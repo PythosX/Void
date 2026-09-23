@@ -1,3 +1,5 @@
+import json
+import hmac
 import os
 import re
 import sqlite3
@@ -25,6 +27,133 @@ if not FERNET_KEY:
     print("Set VOID_FERNET_KEY in .env and keep it backed up securely.")
 fernet = Fernet(FERNET_KEY.encode())
 
+
+@app.post("/telegram/webhook")
+def telegram_webhook():
+
+    secret = os.environ.get(
+        "TELEGRAM_WEBHOOK_SECRET",
+        ""
+    )
+
+    incoming_secret = request.headers.get(
+        "X-Telegram-Bot-Api-Secret-Token",
+        ""
+    )
+
+    if not secret or not hmac.compare_digest(
+        incoming_secret,
+        secret
+    ):
+        return {"ok": False}, 403
+
+    update = request.get_json(
+        silent=True
+    ) or {}
+
+    message = update.get("message", {})
+
+    chat = message.get("chat", {})
+
+    chat_id = chat.get("id")
+
+    text = message.get("text", "").strip()
+
+    if not chat_id:
+        return {"ok": True}
+
+    if text == "/start":
+
+        telegram_api(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": (
+                    "🔐 VOID connected.\n\n"
+                    "Telegram is configured for "
+                    "vault notifications.\n\n"
+                    "Passwords are never sent "
+                    "through Telegram."
+                )
+            }
+        )
+
+    elif text == "/help":
+
+        telegram_api(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": (
+                    "VOID Bot\n\n"
+                    "/start - check connection\n"
+                    "/help - show help\n\n"
+                    "Credential retrieval happens "
+                    "inside the secure VOID web vault."
+                )
+            }
+        )
+
+    else:
+
+        telegram_api(
+            "sendMessage",
+            {
+                "chat_id": chat_id,
+                "text": (
+                    "VOID received your message.\n\n"
+                    "Open the VOID web vault for "
+                    "credential access."
+                )
+            }
+        )
+
+    return {"ok": True}
+
+# temp webhook
+
+@app.get("/telegram/setup")
+def telegram_setup():
+
+    base_url = os.environ.get(
+        "VOID_BASE_URL",
+        ""
+    ).rstrip("/")
+
+    secret = os.environ.get(
+        "TELEGRAM_WEBHOOK_SECRET",
+        ""
+    )
+
+    if not base_url:
+        return {
+            "ok": False,
+            "error": "VOID_BASE_URL missing"
+        }, 400
+
+    if not secret:
+        return {
+            "ok": False,
+            "error": "TELEGRAM_WEBHOOK_SECRET missing"
+        }, 400
+
+    webhook_url = (
+        f"{base_url}/telegram/webhook"
+    )
+
+    result = telegram_api(
+        "setWebhook",
+        {
+            "url": webhook_url,
+            "secret_token": secret,
+            "drop_pending_updates": True
+        }
+    )
+
+    return result or {
+        "ok": False,
+        "error": "Telegram API unavailable"
+    }
 
 def db():
     conn = sqlite3.connect(DB)
@@ -72,95 +201,337 @@ def decrypt(value):
 
 
 def send_telegram(message):
-    token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
-    if not token or not chat_id:
+
+    chat_id = os.environ.get(
+        "TELEGRAM_CHAT_ID",
+        ""
+    ).strip()
+
+    if not chat_id:
+        print("TELEGRAM_CHAT_ID is missing")
         return False
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{token}/sendMessage",
-            json={"chat_id": chat_id, "text": message},
-            timeout=8,
-        )
+
+    result = telegram_api(
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": message
+        }
+    )
+
+    if result and result.get("ok"):
+        print("Telegram notification sent")
         return True
-    except requests.RequestException:
-        return False
+
+    print("Telegram notification failed:", result)
+
+    return False
+
+def telegram_api(method, payload=None):
+
+    token = os.environ.get(
+        "TELEGRAM_BOT_TOKEN",
+        ""
+    ).strip()
+
+    if not token:
+        return None
+
+    url = (
+        "https://api.telegram.org/"
+        f"bot{token}/{method}"
+    )
+
+    try:
+
+        response = requests.post(
+            url,
+            json=payload or {},
+            timeout=15
+        )
+
+        response.raise_for_status()
+
+        return response.json()
+
+    except Exception as exc:
+
+        print("Telegram API error:", exc)
+
+        return None
+
+
+
+
+def extract_secret_candidates(text):
+    """
+    Local extraction of likely password/secret values.
+
+    IMPORTANT:
+    This function runs locally. The full password is NOT sent to Gemini.
+    """
+    candidates = []
+
+    patterns = [
+        r"(?i)(?:password|pass|pwd|pw)\s*[:=\-]\s*([^\s]+)",
+        r"(?i)(?:secret|token|key)\s*[:=\-]\s*([^\s]+)",
+    ]
+
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            value = match.group(1).strip().strip('"\'')
+            if value:
+                candidates.append(value)
+
+    return candidates
+
+
+def redact_secrets(text):
+    """
+    Remove obvious password/secret values before sending text to Gemini.
+    """
+    patterns = [
+        r"(?i)((?:password|pass|pwd|pw)\s*[:=\-]\s*)([^\s]+)",
+        r"(?i)((?:secret|token|key)\s*[:=\-]\s*)([^\s]+)",
+    ]
+
+    redacted = text
+
+    for pattern in patterns:
+        redacted = re.sub(
+            pattern,
+            lambda m: m.group(1) + "[REDACTED]",
+            redacted
+        )
+
+    return redacted
+
+
+def gemini_parse(text):
+    """
+    Uses Gemini only for understanding the structure of the text.
+
+    Password values are redacted before the request leaves VOID.
+    """
+
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+
+    if not api_key:
+        return None
+
+    model = os.environ.get(
+        "GEMINI_MODEL",
+        "gemini-3.5-flash-lite"
+    )
+
+    safe_text = redact_secrets(text)
+
+    prompt = f"""
+You are the credential organization engine inside a private password vault.
+
+Analyze the following user text and identify:
+
+- website
+- username
+- email
+- notes
+
+DO NOT try to recover or invent passwords.
+Anything marked [REDACTED] is a secret and must remain [REDACTED].
+
+The user may write information in any order and may use casual language.
+
+Return ONLY JSON.
+
+Input:
+
+{safe_text}
+"""
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "website": {"type": "string"},
+            "username": {"type": "string"},
+            "email": {"type": "string"},
+            "notes": {"type": "string"}
+        },
+        "required": [
+            "website",
+            "username",
+            "email",
+            "notes"
+        ]
+    }
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/"
+        f"models/{model}:generateContent"
+    )
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": schema,
+            "temperature": 0
+        }
+    }
+
+    try:
+        response = requests.post(
+            url,
+            params={"key": api_key},
+            json=payload,
+            timeout=20
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        text_result = (
+            data["candidates"][0]
+            ["content"]["parts"][0]["text"]
+        )
+
+        return json.loads(text_result)
+
+    except Exception as exc:
+        print("Gemini parser error:", exc)
+        return None
 
 
 def parse_messy(text):
-    """
-    Conservative local parser. It recognizes common labels and URLs/domains.
-    It does NOT send the pasted password to an AI service.
-    """
-    raw = text.strip()
-    lines = [x.strip() for x in raw.splitlines() if x.strip()]
-    website = username = password = notes = ""
 
-    pw_patterns = [
-        r"(?i)^(?:password|pass|pwd|pw)\s*[:=\-]\s*(.+)$",
-    ]
-    user_patterns = [
-        r"(?i)^(?:username|user|email|mail|login)\s*[:=\-]\s*(.+)$",
-    ]
-    site_patterns = [
-        r"(?i)^(?:website|site|url|service|app)\s*[:=\-]\s*(.+)$",
+    # First: local secret extraction
+    passwords = extract_secret_candidates(text)
+
+    # Second: AI understands the non-secret structure
+    ai_result = gemini_parse(text)
+
+    if ai_result:
+
+        website = ai_result.get("website", "").strip()
+        username = ai_result.get("username", "").strip()
+        email = ai_result.get("email", "").strip()
+        notes = ai_result.get("notes", "").strip()
+
+        if not username:
+            username = email
+
+        password = passwords[0] if passwords else ""
+
+        return {
+            "website": website,
+            "username": username,
+            "password": password,
+            "notes": notes
+        }
+
+    # Fallback if Gemini is unavailable
+    return local_parse_fallback(text)
+
+def local_parse_fallback(text):
+
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip()
     ]
 
-    leftovers = []
+    website = ""
+    username = ""
+    password = ""
+    notes = []
+
     for line in lines:
-        found = False
-        for p in pw_patterns:
-            m = re.match(p, line)
-            if m:
-                password = m.group(1).strip()
-                found = True
-                break
-        if found:
-            continue
-        for p in user_patterns:
-            m = re.match(p, line)
-            if m:
-                username = m.group(1).strip()
-                found = True
-                break
-        if found:
-            continue
-        for p in site_patterns:
-            m = re.match(p, line)
-            if m:
-                website = m.group(1).strip()
-                found = True
-                break
-        if found:
+
+        lower = line.lower()
+
+        if re.match(
+            r"^(password|pass|pwd|pw)\s*[:=\-]",
+            lower
+        ):
+            match = re.split(
+                r"[:=\-]",
+                line,
+                maxsplit=1
+            )
+
+            if len(match) == 2:
+                password = match[1].strip()
+
             continue
 
-        url = re.search(r"(https?://[^\s]+|(?:www\.)?[a-zA-Z0-9-]+\.(?:com|in|org|net|io|dev|ai|co)(?:/[^\s]*)?)", line)
-        if url and not website:
-            website = url.group(1).strip()
-            found = True
+        if re.match(
+            r"^(username|user|email|mail|login)\s*[:=\-]",
+            lower
+        ):
+            match = re.split(
+                r"[:=\-]",
+                line,
+                maxsplit=1
+            )
 
-        email = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", line)
-        if email and not username:
-            username = email.group(0)
-            found = True
+            if len(match) == 2:
+                username = match[1].strip()
 
-        if not found:
-            leftovers.append(line)
+            continue
 
-    # Helpful fallback: if the first line looks like a service name, use it as website.
+        if re.match(
+            r"^(website|site|url|service|app)\s*[:=\-]",
+            lower
+        ):
+            match = re.split(
+                r"[:=\-]",
+                line,
+                maxsplit=1
+            )
+
+            if len(match) == 2:
+                website = match[1].strip()
+
+            continue
+
+        email_match = re.search(
+            r"[\w.+-]+@[\w-]+\.[\w.-]+",
+            line
+        )
+
+        if email_match and not username:
+            username = email_match.group(0)
+
+        url_match = re.search(
+            r"(https?://[^\s]+|"
+            r"(?:www\.)?[a-zA-Z0-9-]+\."
+            r"(?:com|in|org|net|io|dev|ai|co))",
+            line
+        )
+
+        if url_match and not website:
+            website = url_match.group(1)
+
+        if not email_match and not url_match:
+            notes.append(line)
+
     if not website and lines:
         website = lines[0]
-
-    if leftovers:
-        notes = "\n".join(leftovers)
 
     return {
         "website": website,
         "username": username,
         "password": password,
-        "notes": notes,
+        "notes": "\n".join(notes)
     }
-
 
 def logged_in():
     if not session.get("unlocked"):
