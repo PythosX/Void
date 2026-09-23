@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block content %}
+<section class="auth-card">
+  <div class="eyebrow">PRIVATE CREDENTIAL VAULT</div>
+  <h1>Create your VOID</h1>
+  <p class="muted">One master password protects your encrypted vault.</p>
+  <form method="post">
+    <label>Master password</label><input name="master_password" type="password" minlength="10" required>
+    <label>Confirm master password</label><input name="confirm_password" type="password" minlength="10" required>
+    <label>Verification question</label><input name="question" placeholder="Example: What was my first school?" required>
+    <label>Verification answer</label><input name="answer" type="password" required>
+    <button>Create vault</button>
+  </form>
+  <p class="tiny">Use a unique master password. This MVP's recovery answer can unlock the vault, so protect it like a second secret.</p>
+</section>
+{% endblock %}

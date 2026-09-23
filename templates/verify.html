@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block content %}
+<section class="auth-card">
+  <div class="eyebrow">RECOVERY CHECK</div>
+  <h1>Verify identity</h1>
+  <p class="muted">Your master password was not accepted. Answer your saved verification question.</p>
+  <div class="question">{{ question }}</div>
+  <form method="post">
+    <label>Answer</label><input name="answer" type="password" autofocus required>
+    <button>Verify & unlock</button>
+  </form>
+  <a class="secondary-link" href="{{ url_for('login') }}">Back to master password</a>
+</section>
+{% endblock %}

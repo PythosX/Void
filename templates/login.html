@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block content %}
+<section class="auth-card">
+  <div class="logo">◉</div><div class="eyebrow">VOID VAULT</div>
+  <h1>Unlock your vault</h1>
+  <p class="muted">Enter the single master password.</p>
+  <form method="post">
+    <label>Master password</label><input name="master_password" type="password" autofocus required>
+    <button>Unlock</button>
+  </form>
+  <a class="secondary-link" href="{{ url_for('verify') }}">I need verification</a>
+</section>
+{% endblock %}

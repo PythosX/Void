@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block content %}
+<section class="card narrow"><div class="eyebrow">EDIT CREDENTIAL</div><h1>{{ item.website }}</h1>
+<form method="post">
+<label>Website</label><input name="website" value="{{ item.website }}" required>
+<label>Username / email</label><input name="username" value="{{ item.username }}">
+<label>Password</label><input name="password" value="{{ item.password }}" required>
+<label>Notes</label><textarea name="notes" rows="6">{{ item.notes }}</textarea>
+<button>Save changes</button>
+</form></section>
+{% endblock %}

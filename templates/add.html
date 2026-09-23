@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block content %}
+<div class="hero-row"><div><div class="eyebrow">SMART INPUT</div><h1>Add credential</h1><p class="muted">Paste your information in almost any order.</p></div></div>
+<form method="post" class="two-col">
+  <section class="card">
+    <label>Messy credential text</label>
+    <textarea name="raw" rows="16" placeholder="github
+email: you@example.com
+password: example123">{{ raw }}</textarea>
+    <button name="confirm_save" value="0">Parse text</button>
+  </section>
+  <section class="card">
+    <h2>Detected fields</h2>
+    <p class="tiny">Review everything before saving.</p>
+    <label>Website</label><input name="website" value="{{ parsed.website }}" required>
+    <label>Username / email</label><input name="username" value="{{ parsed.username }}">
+    <label>Password</label><input name="password" value="{{ parsed.password }}" required>
+    <label>Notes</label><textarea name="notes" rows="5">{{ parsed.notes }}</textarea>
+    <button name="confirm_save" value="1">Encrypt & save</button>
+  </section>
+</form>
+{% endblock %}

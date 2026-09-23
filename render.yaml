@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: void-vault
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --bind 0.0.0.0:$PORT app:app
+    envVars:
+      - key: VOID_SECRET_KEY
+        sync: false
+      - key: VOID_FERNET_KEY
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: VOID_BASE_URL
+        sync: false
+      - key: SESSION_MINUTES
+        value: "15"

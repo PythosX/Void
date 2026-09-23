@@ -1,0 +1,25 @@
+{% extends "base.html" %}{% block content %}
+<div class="hero-row">
+  <div><div class="eyebrow">PERSONAL VAULT</div><h1>Your credentials</h1><p class="muted">Encrypted records, organized from messy input.</p></div>
+  <a class="button" href="{{ url_for('add') }}">+ Add credential</a>
+</div>
+<form class="search" method="get"><input name="q" value="{{ query }}" placeholder="Search website, username or notes..."><button>Search</button></form>
+<div class="grid">
+{% for c in credentials %}
+  <article class="card">
+    <div class="card-head"><div><span class="site-dot">●</span><h2>{{ c.website }}</h2></div><a href="{{ url_for('edit', credential_id=c.id) }}">Edit</a></div>
+    <p class="label">USERNAME / EMAIL</p><p>{{ c.username or "—" }}</p>
+    <p class="label">PASSWORD</p>
+    <div class="secret"><input value="{{ c.password }}" type="password" readonly id="pw-{{ c.id }}"><button type="button" onclick="toggleSecret('pw-{{ c.id }}')">Show</button><button type="button" onclick="copySecret('pw-{{ c.id }}')">Copy</button></div>
+    {% if c.notes %}<p class="label">NOTES</p><p class="notes">{{ c.notes }}</p>{% endif %}
+    <form method="post" action="{{ url_for('delete', credential_id=c.id) }}" onsubmit="return confirm('Delete this credential?');"><button class="danger">Delete</button></form>
+  </article>
+{% else %}
+  <div class="empty"><h2>No credentials yet</h2><p>Use “Add credential” and paste your messy text.</p></div>
+{% endfor %}
+</div>
+<script>
+function toggleSecret(id){const e=document.getElementById(id);e.type=e.type==='password'?'text':'password'}
+async function copySecret(id){const e=document.getElementById(id);await navigator.clipboard.writeText(e.value);alert('Copied. Clear your clipboard when finished.')}
+</script>
+{% endblock %}
